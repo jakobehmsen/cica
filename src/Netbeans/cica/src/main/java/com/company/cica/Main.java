@@ -23,13 +23,18 @@
  */
 package com.company.cica;
 
+import java.awt.Graphics;
+import java.awt.Graphics2D;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.event.MouseMotionAdapter;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
+import java.awt.geom.GeneralPath;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Queue;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
@@ -37,6 +42,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 import javax.swing.JComponent;
 import javax.swing.JFrame;
+import javax.swing.JPanel;
 
 /**
  *
@@ -148,7 +154,7 @@ public class Main {
                                 final double direction = Math.toDegrees(Math.atan2(x2 - x1, y2 - y1));
                                 //System.out.println("referenceDirection=" + referenceDirection);
                                 //System.out.println("direction=" + direction);
-                                if(Math.abs(referenceDirection - direction) <= 25) {
+                                if(Math.abs(referenceDirection - direction) <= 20) {
                                     return new RecognizerState() {
                                         @Override
                                         public RecognizerState nextOrNullAfter(Object event) {
@@ -196,13 +202,69 @@ public class Main {
         }
     }
     
+    private interface DrawingTarget {
+        Drawing newDrawing(int x, int y);
+    }
+    
+    private interface Drawing {
+        void moveTo(int x, int y);
+        void delete();
+    }
+    
+    private static class DrawingTargetPanel extends JPanel implements DrawingTarget {
+        private class DrawingPanel implements Drawing {
+            private GeneralPath path = new GeneralPath();
+            
+            public DrawingPanel(int x, int y) {
+                path.moveTo(x, y);
+            }
+            
+            @Override
+            public void moveTo(int x, int y) {
+                path.lineTo(x, y);
+            }
+
+            @Override
+            public void delete() {
+                drawings.remove(this);
+            }
+            
+            public void drawOn(Graphics2D graphics) {
+                graphics.draw(path);
+            }
+        }
+        
+        private List<DrawingPanel> drawings = new ArrayList<>();
+        
+        @Override
+        public Drawing newDrawing(int x, int y) {
+            DrawingPanel drawing = new DrawingPanel(x, y);
+            
+            drawings.add(drawing);
+            
+            return drawing;
+        }
+
+        @Override
+        public void paint(Graphics g) {
+            g.setColor(getBackground());
+            g.fillRect(getX(), getY(), getWidth(), getHeight());
+            g.setColor(getForeground());
+            drawings.forEach(d -> d.drawOn((Graphics2D) g));
+        }
+    }
+    
     public static void main(String[] args) {        
         Pattern p = Patterns.line();
         
-        BlockingQueue<Object> eventQueue = new ArrayBlockingQueue<Object>(10);
+        BlockingQueue<Object> eventQueue = new ArrayBlockingQueue<>(10);
+        
+        DrawingTargetPanel drawingTargetPanel = new DrawingTargetPanel();
+        DrawingTarget drawingTarget = drawingTargetPanel;
         
         Thread eventProcessor = new Thread(new Runnable() {
             Recognizer recognizer;
+            Drawing drawing;
             
             @Override
             public void run() {
@@ -215,25 +277,38 @@ public class Main {
                             recognizer = p.recognize();
                             
                             System.out.println("Start recognition");
+                            
+                            drawing = drawingTarget.newDrawing(((PenDownAtEvent)event).x, ((PenDownAtEvent)event).y);
                         }
                         
                         if(recognizer != null) {                        
-                            System.out.println("event=" + event);
+                            //System.out.println("event=" + event);
+                            
+                            if(event instanceof PenMovedToEvent) {
+                                drawing.moveTo(((PenMovedToEvent)event).x, ((PenMovedToEvent)event).y);
+                            }
                         
                             if(!recognizer.accepts(event)) {
                                 // Recognition failed
                                 recognizer = null;
                                 
                                 System.out.println("Recognition failed");
+                                
+                                drawing.delete();
                             } else {
                                 if(event instanceof PenUpEvent) {
                                     // Recognition succeded
                                     recognizer = null;
                                 
                                     System.out.println("Recognition succeded");
+                                    
+                                    drawing.delete();
                                 }
                             }
                         }
+                        
+                        drawingTargetPanel.repaint();
+                        drawingTargetPanel.invalidate();
                     }
                 } catch (InterruptedException ex) {
                     Logger.getLogger(Main.class.getName()).log(Level.SEVERE, null, ex);
@@ -244,6 +319,7 @@ public class Main {
         eventProcessor.start();
         
         JFrame frame = new JFrame("Line recognizer");
+        frame.setContentPane(drawingTargetPanel);
         JComponent canvas = (JComponent) frame.getContentPane();
         
         canvas.addMouseListener(new MouseAdapter() {
