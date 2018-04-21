@@ -23,9 +23,20 @@
  */
 package com.company.cica;
 
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
+import java.awt.event.MouseMotionAdapter;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 import java.util.ArrayDeque;
 import java.util.Arrays;
 import java.util.Queue;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.BlockingQueue;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+import javax.swing.JComponent;
+import javax.swing.JFrame;
 
 /**
  *
@@ -40,6 +51,11 @@ public class Main {
             this.x = x;
             this.y = y;
         }
+
+        @Override
+        public String toString() {
+            return "PenDownAtEvent{" + "x=" + x + ", y=" + y + '}';
+        }
     }
     
     public static class PenMovedToEvent {
@@ -50,10 +66,18 @@ public class Main {
             this.x = x;
             this.y = y;
         }
+
+        @Override
+        public String toString() {
+            return "PenMovedToEvent{" + "x=" + x + ", y=" + y + '}';
+        }
     }
     
     public static class PenUpEvent {
-        
+        @Override
+        public String toString() {
+            return "PenUpEvent{" + '}';
+        }
     }
     
     private static class Patterns {
@@ -117,14 +141,41 @@ public class Main {
                             final int x2 = penMovedToEvent.x;
                             final int y2 = penMovedToEvent.y;
                             
-                            //int distance = (int)Math.hypot(x1-x2, y1-y2);
-                            final double direction = Math.toDegrees(Math.atan2(x2 - x1, y2 - y1));
-                            if(Math.abs(referenceDirection - direction) <= 10) {
+                            int distance = (int)Math.hypot(x1-x2, y1-y2);
+                            //System.out.println("distance=" + distance);
+                            if(distance > 5) {
+                                //System.out.println("accepted distance");
+                                final double direction = Math.toDegrees(Math.atan2(x2 - x1, y2 - y1));
+                                //System.out.println("referenceDirection=" + referenceDirection);
+                                //System.out.println("direction=" + direction);
+                                if(Math.abs(referenceDirection - direction) <= 25) {
+                                    return new RecognizerState() {
+                                        @Override
+                                        public RecognizerState nextOrNullAfter(Object event) {
+                                            if(event instanceof PenMovedToEvent) {
+                                                return proceedingDirection(x2, y2, direction, (PenMovedToEvent)event);
+                                            } else if(event instanceof PenUpEvent) {
+                                                return new RecognizerState() {
+                                                    @Override
+                                                    public RecognizerState nextOrNullAfter(Object event) {
+                                                        return null;
+                                                    }
+                                                };
+                                            } else {
+                                                return null;
+                                            }
+                                        }
+                                    };
+                                } else {
+                                    return null;
+                                }
+                            } else {
+                                //System.out.println("rejected distance");
                                 return new RecognizerState() {
                                     @Override
                                     public RecognizerState nextOrNullAfter(Object event) {
                                         if(event instanceof PenMovedToEvent) {
-                                            return proceedingDirection(x2, y2, direction, (PenMovedToEvent)event);
+                                            return proceedingDirection(x1, y1, referenceDirection, (PenMovedToEvent)event);
                                         } else if(event instanceof PenUpEvent) {
                                             return new RecognizerState() {
                                                 @Override
@@ -137,8 +188,6 @@ public class Main {
                                         }
                                     }
                                 };
-                            } else {
-                                return null;
                             }
                         }
                     });
@@ -147,10 +196,92 @@ public class Main {
         }
     }
     
-    public static void main(String[] args) {
+    public static void main(String[] args) {        
         Pattern p = Patterns.line();
         
-        Recognizer r = p.recognize();
+        BlockingQueue<Object> eventQueue = new ArrayBlockingQueue<Object>(10);
+        
+        Thread eventProcessor = new Thread(new Runnable() {
+            Recognizer recognizer;
+            
+            @Override
+            public void run() {
+                try {
+                    while(true) {
+                        Object event = eventQueue.take();
+
+                        if(event instanceof PenDownAtEvent) {
+                            // Start recognition
+                            recognizer = p.recognize();
+                            
+                            System.out.println("Start recognition");
+                        }
+                        
+                        if(recognizer != null) {                        
+                            System.out.println("event=" + event);
+                        
+                            if(!recognizer.accepts(event)) {
+                                // Recognition failed
+                                recognizer = null;
+                                
+                                System.out.println("Recognition failed");
+                            } else {
+                                if(event instanceof PenUpEvent) {
+                                    // Recognition succeded
+                                    recognizer = null;
+                                
+                                    System.out.println("Recognition succeded");
+                                }
+                            }
+                        }
+                    }
+                } catch (InterruptedException ex) {
+                    Logger.getLogger(Main.class.getName()).log(Level.SEVERE, null, ex);
+                }
+            }
+        });
+        
+        eventProcessor.start();
+        
+        JFrame frame = new JFrame("Line recognizer");
+        JComponent canvas = (JComponent) frame.getContentPane();
+        
+        canvas.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mousePressed(MouseEvent e) {
+                eventQueue.offer(new PenDownAtEvent(e.getX(), e.getY()));
+            }
+
+            @Override
+            public void mouseReleased(MouseEvent e) {
+                eventQueue.offer(new PenUpEvent());
+            }
+        });
+        
+        canvas.addMouseMotionListener(new MouseMotionAdapter() {
+            @Override
+            public void mouseMoved(MouseEvent e) {
+                eventQueue.offer(new PenMovedToEvent(e.getX(), e.getY()));
+            }
+
+            @Override
+            public void mouseDragged(MouseEvent e) {
+                eventQueue.offer(new PenMovedToEvent(e.getX(), e.getY()));
+            }
+        });
+        
+        frame.setSize(640, 480);
+        frame.setLocationRelativeTo(null);
+        frame.addWindowListener(new WindowAdapter() {
+            @Override
+            public void windowClosing(WindowEvent e) {
+                eventProcessor.interrupt();
+            }
+        });
+        frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        frame.setVisible(true);
+        
+        /*Recognizer r = p.recognize();
         
         Object[] events = {
             new PenDownAtEvent(5, 5),
@@ -172,6 +303,6 @@ public class Main {
             System.out.println("Drawing is a line");
         } else {
             System.out.println("Drawing is not a line");
-        }
+        }*/
     }
 }
