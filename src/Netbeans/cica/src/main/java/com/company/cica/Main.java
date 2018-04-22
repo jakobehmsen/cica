@@ -25,6 +25,7 @@ package com.company.cica;
 
 import java.awt.Graphics;
 import java.awt.Graphics2D;
+import java.awt.RenderingHints;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.event.MouseMotionAdapter;
@@ -211,6 +212,12 @@ public class Main {
 
         @Override
         public void paint(Graphics g) {
+            Graphics2D g2 = (Graphics2D)g;
+            RenderingHints rh = new RenderingHints(
+                RenderingHints.KEY_ANTIALIASING,
+                RenderingHints.VALUE_ANTIALIAS_ON);
+            g2.setRenderingHints(rh);
+            
             g.setColor(getBackground());
             g.fillRect(getX(), getY(), getWidth(), getHeight());
             g.setColor(getForeground());
