@@ -42,4 +42,13 @@ public class StateBasedRecognizer implements Recognizer {
         
         return state != null;
     }
+
+    @Override
+    public CanvasAction getIntentOrNull() {
+        if(state != null) {
+            return state.getIntentOrNull();
+        }
+        
+        return null;
+    }
 }

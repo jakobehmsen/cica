@@ -27,9 +27,6 @@ package com.company.cica;
  *
  * @author jakob
  */
-public interface RecognizerState {
-    RecognizerState nextOrNullAfter(Object event);
-    default CanvasAction getIntentOrNull() {
-        return null;
-    }
+public interface Canvas {
+    Drawing newDrawing(int x, int y);
 }

@@ -29,4 +29,5 @@ package com.company.cica;
  */
 public interface Recognizer {
     boolean accepts(Object event);
+    CanvasAction getIntentOrNull();
 }

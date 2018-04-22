@@ -31,16 +31,12 @@ import java.awt.event.MouseMotionAdapter;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.awt.geom.GeneralPath;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
-import java.util.Queue;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import javax.swing.JComponent;
 import javax.swing.JFrame;
 import javax.swing.JPanel;
 
@@ -118,10 +114,10 @@ public class Main {
                         }
 
                         private RecognizerState firstDirection(int x1, int y1, PenMovedToEvent penMovedToEvent) {
-                            return proceedingDirection(x1, y1, false, 0.0, penMovedToEvent);
+                            return proceedingDirection(x1, y1, x1, y1, false, 0.0, penMovedToEvent);
                         }
 
-                        private RecognizerState proceedingDirection(int x1, int y1, boolean hasReferenceDirection, double referenceDirection, PenMovedToEvent penMovedToEvent) {
+                        private RecognizerState proceedingDirection(int xStart, int yStart, int x1, int y1, boolean hasReferenceDirection, double referenceDirection, PenMovedToEvent penMovedToEvent) {
                             final int x2 = penMovedToEvent.x;
                             final int y2 = penMovedToEvent.y;
                             
@@ -133,27 +129,38 @@ public class Main {
                                 //System.out.println("referenceDirection=" + referenceDirection);
                                 //System.out.println("direction=" + direction);
                                 if(!hasReferenceDirection || Math.abs(referenceDirection - direction) <= 20) {
-                                    return proceedingDirectionState(x2, y2, true, direction);
+                                    return proceedingDirectionState(xStart, yStart, x2, y2, true, direction);
                                 } else {
                                     return null;
                                 }
                             } else {
                                 //System.out.println("rejected distance");
-                                return proceedingDirectionState(x1, y1, hasReferenceDirection, referenceDirection);
+                                return proceedingDirectionState(xStart, yStart, x1, y1, hasReferenceDirection, referenceDirection);
                             }
                         }
                         
-                        private RecognizerState proceedingDirectionState(int x1, int y1, boolean hasReferenceDirection, double referenceDirection) {
+                        private RecognizerState proceedingDirectionState(int xStart, int yStart, int x1, int y1, boolean hasReferenceDirection, double referenceDirection) {
                             return new RecognizerState() {
                                 @Override
                                 public RecognizerState nextOrNullAfter(Object event) {
                                     if(event instanceof PenMovedToEvent) {
-                                        return proceedingDirection(x1, y1, hasReferenceDirection, referenceDirection, (PenMovedToEvent)event);
+                                        return proceedingDirection(xStart, yStart, x1, y1, hasReferenceDirection, referenceDirection, (PenMovedToEvent)event);
                                     } else if(event instanceof PenUpEvent) {
                                         return new RecognizerState() {
                                             @Override
                                             public RecognizerState nextOrNullAfter(Object event) {
                                                 return null;
+                                            }
+
+                                            @Override
+                                            public CanvasAction getIntentOrNull() {
+                                                return new CanvasAction() {
+                                                    @Override
+                                                    public void perform(Canvas canvas) {
+                                                        Drawing drawing = canvas.newDrawing(xStart, yStart);
+                                                        drawing.moveTo(x1, y1);
+                                                    }
+                                                };
                                             }
                                         };
                                     } else {
@@ -168,16 +175,7 @@ public class Main {
         }
     }
     
-    private interface DrawingTarget {
-        Drawing newDrawing(int x, int y);
-    }
-    
-    private interface Drawing {
-        void moveTo(int x, int y);
-        void delete();
-    }
-    
-    private static class DrawingTargetPanel extends JPanel implements DrawingTarget {
+    private static class CanvasPanel extends JPanel implements Canvas {
         private class DrawingPanel implements Drawing {
             private GeneralPath path = new GeneralPath();
             
@@ -225,8 +223,8 @@ public class Main {
         
         BlockingQueue<Object> eventQueue = new ArrayBlockingQueue<>(10);
         
-        DrawingTargetPanel drawingTargetPanel = new DrawingTargetPanel();
-        DrawingTarget drawingTarget = drawingTargetPanel;
+        CanvasPanel canvasPanel = new CanvasPanel();
+        Canvas canvas = canvasPanel;
         
         Thread eventProcessor = new Thread(new Runnable() {
             Recognizer recognizer;
@@ -244,7 +242,7 @@ public class Main {
                             
                             System.out.println("Start recognition");
                             
-                            drawing = drawingTarget.newDrawing(((PenDownAtEvent)event).x, ((PenDownAtEvent)event).y);
+                            drawing = canvas.newDrawing(((PenDownAtEvent)event).x, ((PenDownAtEvent)event).y);
                         }
                         
                         if(recognizer != null) {                        
@@ -264,17 +262,20 @@ public class Main {
                             } else {
                                 if(event instanceof PenUpEvent) {
                                     // Recognition succeded
-                                    recognizer = null;
                                 
                                     System.out.println("Recognition succeded");
                                     
                                     drawing.delete();
+                                    
+                                    CanvasAction intent = recognizer.getIntentOrNull();
+                                    intent.perform(canvas);
+                                    recognizer = null;
                                 }
                             }
                         }
                         
-                        drawingTargetPanel.repaint();
-                        drawingTargetPanel.invalidate();
+                        canvasPanel.repaint();
+                        canvasPanel.invalidate();
                     }
                 } catch (InterruptedException ex) {
                     Logger.getLogger(Main.class.getName()).log(Level.SEVERE, null, ex);
@@ -285,10 +286,9 @@ public class Main {
         eventProcessor.start();
         
         JFrame frame = new JFrame("Line recognizer");
-        frame.setContentPane(drawingTargetPanel);
-        JComponent canvas = (JComponent) frame.getContentPane();
+        frame.setContentPane(canvasPanel);
         
-        canvas.addMouseListener(new MouseAdapter() {
+        canvasPanel.addMouseListener(new MouseAdapter() {
             @Override
             public void mousePressed(MouseEvent e) {
                 eventQueue.offer(new PenDownAtEvent(e.getX(), e.getY()));
@@ -300,7 +300,7 @@ public class Main {
             }
         });
         
-        canvas.addMouseMotionListener(new MouseMotionAdapter() {
+        canvasPanel.addMouseMotionListener(new MouseMotionAdapter() {
             @Override
             public void mouseMoved(MouseEvent e) {
                 eventQueue.offer(new PenMovedToEvent(e.getX(), e.getY()));
