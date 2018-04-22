@@ -118,17 +118,37 @@ public class Main {
                         }
 
                         private RecognizerState firstDirection(int x1, int y1, PenMovedToEvent penMovedToEvent) {
+                            return proceedingDirection(x1, y1, false, 0.0, penMovedToEvent);
+                        }
+
+                        private RecognizerState proceedingDirection(int x1, int y1, boolean hasReferenceDirection, double referenceDirection, PenMovedToEvent penMovedToEvent) {
                             final int x2 = penMovedToEvent.x;
                             final int y2 = penMovedToEvent.y;
                             
-                            //int distance = (int)Math.hypot(x1-x2, y1-y2);
-                            final double direction = Math.toDegrees(Math.atan2(x2 - x1, y2 - y1));
-                            
+                            int distance = (int)Math.hypot(x1-x2, y1-y2);
+                            //System.out.println("distance=" + distance);
+                            if(distance > 5) {
+                                //System.out.println("accepted distance");
+                                final double direction = Math.toDegrees(Math.atan2(x2 - x1, y2 - y1));
+                                //System.out.println("referenceDirection=" + referenceDirection);
+                                //System.out.println("direction=" + direction);
+                                if(!hasReferenceDirection || Math.abs(referenceDirection - direction) <= 20) {
+                                    return proceedingDirectionState(x2, y2, true, direction);
+                                } else {
+                                    return null;
+                                }
+                            } else {
+                                //System.out.println("rejected distance");
+                                return proceedingDirectionState(x1, y1, hasReferenceDirection, referenceDirection);
+                            }
+                        }
+                        
+                        private RecognizerState proceedingDirectionState(int x1, int y1, boolean hasReferenceDirection, double referenceDirection) {
                             return new RecognizerState() {
                                 @Override
                                 public RecognizerState nextOrNullAfter(Object event) {
                                     if(event instanceof PenMovedToEvent) {
-                                        return proceedingDirection(x2, y2, direction, (PenMovedToEvent)event);
+                                        return proceedingDirection(x1, y1, hasReferenceDirection, referenceDirection, (PenMovedToEvent)event);
                                     } else if(event instanceof PenUpEvent) {
                                         return new RecognizerState() {
                                             @Override
@@ -141,60 +161,6 @@ public class Main {
                                     }
                                 }
                             };
-                        }
-
-                        private RecognizerState proceedingDirection(int x1, int y1, double referenceDirection, PenMovedToEvent penMovedToEvent) {
-                            final int x2 = penMovedToEvent.x;
-                            final int y2 = penMovedToEvent.y;
-                            
-                            int distance = (int)Math.hypot(x1-x2, y1-y2);
-                            //System.out.println("distance=" + distance);
-                            if(distance > 5) {
-                                //System.out.println("accepted distance");
-                                final double direction = Math.toDegrees(Math.atan2(x2 - x1, y2 - y1));
-                                //System.out.println("referenceDirection=" + referenceDirection);
-                                //System.out.println("direction=" + direction);
-                                if(Math.abs(referenceDirection - direction) <= 20) {
-                                    return new RecognizerState() {
-                                        @Override
-                                        public RecognizerState nextOrNullAfter(Object event) {
-                                            if(event instanceof PenMovedToEvent) {
-                                                return proceedingDirection(x2, y2, direction, (PenMovedToEvent)event);
-                                            } else if(event instanceof PenUpEvent) {
-                                                return new RecognizerState() {
-                                                    @Override
-                                                    public RecognizerState nextOrNullAfter(Object event) {
-                                                        return null;
-                                                    }
-                                                };
-                                            } else {
-                                                return null;
-                                            }
-                                        }
-                                    };
-                                } else {
-                                    return null;
-                                }
-                            } else {
-                                //System.out.println("rejected distance");
-                                return new RecognizerState() {
-                                    @Override
-                                    public RecognizerState nextOrNullAfter(Object event) {
-                                        if(event instanceof PenMovedToEvent) {
-                                            return proceedingDirection(x1, y1, referenceDirection, (PenMovedToEvent)event);
-                                        } else if(event instanceof PenUpEvent) {
-                                            return new RecognizerState() {
-                                                @Override
-                                                public RecognizerState nextOrNullAfter(Object event) {
-                                                    return null;
-                                                }
-                                            };
-                                        } else {
-                                            return null;
-                                        }
-                                    }
-                                };
-                            }
                         }
                     });
                 }
@@ -356,29 +322,5 @@ public class Main {
         });
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         frame.setVisible(true);
-        
-        /*Recognizer r = p.recognize();
-        
-        Object[] events = {
-            new PenDownAtEvent(5, 5),
-            new PenMovedToEvent(10, 10),
-            new PenMovedToEvent(16, 15),
-            new PenUpEvent()
-        };
-        
-        Queue eventQueue = new ArrayDeque(Arrays.asList(events));
-        
-        while(eventQueue.size() > 0) {
-            Object event = eventQueue.poll();
-            if(!r.accepts(event)) {
-                break;
-            }
-        }
-        
-        if(eventQueue.isEmpty()) {
-            System.out.println("Drawing is a line");
-        } else {
-            System.out.println("Drawing is not a line");
-        }*/
     }
 }
