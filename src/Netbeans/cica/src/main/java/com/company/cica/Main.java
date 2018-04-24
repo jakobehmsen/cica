@@ -83,94 +83,143 @@ public class Main {
         }
     }
     
-    private static class Patterns {
-        public static Pattern line() {
-            return new Pattern() {
+    private static class Matchers {
+        public static Matcher canvasDrawing(CanvasPanel canvasPanel, Matcher matcher) {
+            return new Matcher() {
                 @Override
-                public Recognizer recognize() {
-                    return new StateBasedRecognizer(new RecognizerState() {
-                        @Override
-                        public RecognizerState nextOrNullAfter(Object event) {
-                            if(event instanceof PenDownAtEvent) {
-                                return afterPenDown((PenDownAtEvent)event);
-                            } else {
-                                return null;
-                            }
-                        }
+                public Object match(Input input) throws InterruptedException {
+                    while(true) {
+                        Object event = input.take();
 
-                        private RecognizerState afterPenDown(PenDownAtEvent penDownEvent) {
-                            final int x = penDownEvent.x;
-                            final int y = penDownEvent.y;
-                            
-                            return new RecognizerState() {
+                        if(event instanceof PenDownAtEvent) {
+                            // Start recognition                            
+                            System.out.println("Start recognition");
+                            Canvas canvas = canvasPanel;
+                            final Drawing drawing = canvas.newDrawing(((PenDownAtEvent)event).x, ((PenDownAtEvent)event).y);
+
+                            canvasPanel.repaint();
+                            canvasPanel.invalidate();
+
+                            Input inputWrapper = new Input() {
+                                boolean first = true;
+
                                 @Override
-                                public RecognizerState nextOrNullAfter(Object event) {
-                                    if(event instanceof PenMovedToEvent) {
-                                        return firstDirection(x, y, (PenMovedToEvent)event);
-                                    } else {
-                                        return null;
+                                public Object take() throws InterruptedException {
+                                    if(first) {
+                                        first = false;
+                                        return event;
                                     }
+
+                                    Object event = input.take();
+
+                                    if(event instanceof PenMovedToEvent) {
+                                        drawing.moveTo(((PenMovedToEvent)event).x, ((PenMovedToEvent)event).y);
+                                        canvasPanel.repaint();
+                                        canvasPanel.invalidate();
+                                    }
+
+                                    return event;
                                 }
                             };
-                        }
 
-                        private RecognizerState firstDirection(int x1, int y1, PenMovedToEvent penMovedToEvent) {
-                            return proceedingDirection(x1, y1, x1, y1, false, 0.0, penMovedToEvent);
-                        }
+                            // Start recognition
+                            System.out.println("Start recognition");
 
-                        private RecognizerState proceedingDirection(int xStart, int yStart, int x1, int y1, boolean hasReferenceDirection, double referenceDirection, PenMovedToEvent penMovedToEvent) {
-                            final int x2 = penMovedToEvent.x;
-                            final int y2 = penMovedToEvent.y;
-                            
-                            int distance = (int)Math.hypot(x1-x2, y1-y2);
-                            //System.out.println("distance=" + distance);
-                            if(distance > 5) {
-                                //System.out.println("accepted distance");
-                                final double direction = Math.toDegrees(Math.atan2(x2 - x1, y2 - y1));
-                                //System.out.println("referenceDirection=" + referenceDirection);
-                                //System.out.println("direction=" + direction);
-                                if(!hasReferenceDirection || Math.abs(referenceDirection - direction) <= 20) {
-                                    return proceedingDirectionState(xStart, yStart, x2, y2, true, direction);
-                                } else {
-                                    return null;
-                                }
+                            Object result = matcher.match(inputWrapper);
+
+                            if(result != null) {
+                                System.out.println("Recognition succeded");
+
+                                drawing.delete();
+
+                                CanvasAction intent = (CanvasAction) result;
+                                intent.perform(canvas);
+
+                                canvasPanel.repaint();
+                                canvasPanel.invalidate();
                             } else {
-                                //System.out.println("rejected distance");
-                                return proceedingDirectionState(xStart, yStart, x1, y1, hasReferenceDirection, referenceDirection);
+                                System.out.println("Recognition failed");
+
+                                drawing.delete();
+
+                                canvasPanel.repaint();
+                                canvasPanel.invalidate();
                             }
                         }
-                        
-                        private RecognizerState proceedingDirectionState(int xStart, int yStart, int x1, int y1, boolean hasReferenceDirection, double referenceDirection) {
-                            return new RecognizerState() {
-                                @Override
-                                public RecognizerState nextOrNullAfter(Object event) {
-                                    if(event instanceof PenMovedToEvent) {
-                                        return proceedingDirection(xStart, yStart, x1, y1, hasReferenceDirection, referenceDirection, (PenMovedToEvent)event);
-                                    } else if(event instanceof PenUpEvent) {
-                                        return new RecognizerState() {
-                                            @Override
-                                            public RecognizerState nextOrNullAfter(Object event) {
-                                                return null;
-                                            }
+                    }
+                }
+            };
+        }
+        
+        public static Matcher lineMatcher() {
+            return new Matcher() {
+                @Override
+                public Object match(Input input) throws InterruptedException {
+                    Object event = input.take();
+                    
+                    if(event instanceof PenDownAtEvent) {
+                        return afterPenDown(input, (PenDownAtEvent)event);
+                    } else {
+                        return null;
+                    }
+                }
+                
+                private Object afterPenDown(Input input, PenDownAtEvent penDownEvent) throws InterruptedException {
+                    final int x = penDownEvent.x;
+                    final int y = penDownEvent.y;
 
-                                            @Override
-                                            public CanvasAction getIntentOrNull() {
-                                                return new CanvasAction() {
-                                                    @Override
-                                                    public void perform(Canvas canvas) {
-                                                        Drawing drawing = canvas.newDrawing(xStart, yStart);
-                                                        drawing.moveTo(x1, y1);
-                                                    }
-                                                };
-                                            }
-                                        };
-                                    } else {
-                                        return null;
-                                    }
-                                }
-                            };
+                    Object event = input.take();
+                    if(event instanceof PenMovedToEvent) {
+                        return firstDirection(input, x, y, (PenMovedToEvent)event);
+                    } else {
+                        return null;
+                    }
+                }
+
+                private Object firstDirection(Input input, int x1, int y1, PenMovedToEvent penMovedToEvent) throws InterruptedException {
+                    return proceedingDirection(input, x1, y1, x1, y1, false, 0.0, penMovedToEvent);
+                }
+                
+                private Object proceedingDirection(Input input, int xStart, int yStart, int x1, int y1, boolean hasReferenceDirection, double referenceDirection, PenMovedToEvent penMovedToEvent) throws InterruptedException {
+                    final int x2 = penMovedToEvent.x;
+                    final int y2 = penMovedToEvent.y;
+
+                    int distance = (int)Math.hypot(x1-x2, y1-y2);
+                    //System.out.println("distance=" + distance);
+                    if(distance > 5) {
+                        //System.out.println("accepted distance");
+                        final double direction = Math.toDegrees(Math.atan2(x2 - x1, y2 - y1));
+                        //System.out.println("referenceDirection=" + referenceDirection);
+                        System.out.println("direction=" + direction);
+                        double delta = Math.abs(referenceDirection - direction);
+                        System.out.println("delta=" + delta);
+                        if(!hasReferenceDirection || Math.abs(referenceDirection - direction) <= 20) {
+                            return proceedingDirectionState(input, xStart, yStart, x2, y2, true, direction);
+                        } else {
+                            return null;
                         }
-                    });
+                    } else {
+                        //System.out.println("rejected distance");
+                        return proceedingDirectionState(input, xStart, yStart, x1, y1, hasReferenceDirection, referenceDirection);
+                    }
+                }
+                
+                private Object proceedingDirectionState(Input input, int xStart, int yStart, int x1, int y1, boolean hasReferenceDirection, double referenceDirection) throws InterruptedException {
+                    Object event = input.take();
+                    
+                    if(event instanceof PenMovedToEvent) {
+                        return proceedingDirection(input, xStart, yStart, x1, y1, hasReferenceDirection, referenceDirection, (PenMovedToEvent)event);
+                    } else if(event instanceof PenUpEvent) {
+                        return new CanvasAction() {
+                            @Override
+                            public void perform(Canvas canvas) {
+                                Drawing drawing = canvas.newDrawing(xStart, yStart);
+                                drawing.moveTo(x1, y1);
+                            }
+                        };
+                    } else {
+                        return null;
+                    }
                 }
             };
         }
@@ -225,13 +274,20 @@ public class Main {
         }
     }
     
-    public static void main(String[] args) {        
-        Pattern p = Patterns.line();
+    public static void main(String[] args) {      
         
         BlockingQueue<Object> eventQueue = new ArrayBlockingQueue<>(10);
         
         CanvasPanel canvasPanel = new CanvasPanel();
         Canvas canvas = canvasPanel;
+        Matcher matcher = Matchers.canvasDrawing(canvasPanel, Matchers.lineMatcher()); 
+        
+        Input eventQueueInput = new Input() {
+            @Override
+            public Object take() throws InterruptedException {
+                return eventQueue.take();
+            }
+        };
         
         Thread eventProcessor = new Thread(new Runnable() {
             Recognizer recognizer;
@@ -240,52 +296,9 @@ public class Main {
             @Override
             public void run() {
                 try {
-                    while(true) {
-                        Object event = eventQueue.take();
-
-                        if(event instanceof PenDownAtEvent) {
-                            // Start recognition
-                            recognizer = p.recognize();
-                            
-                            System.out.println("Start recognition");
-                            
-                            drawing = canvas.newDrawing(((PenDownAtEvent)event).x, ((PenDownAtEvent)event).y);
-                        }
-                        
-                        if(recognizer != null) {                        
-                            //System.out.println("event=" + event);
-                            
-                            if(event instanceof PenMovedToEvent) {
-                                drawing.moveTo(((PenMovedToEvent)event).x, ((PenMovedToEvent)event).y);
-                            }
-                        
-                            if(!recognizer.accepts(event)) {
-                                // Recognition failed
-                                recognizer = null;
-                                
-                                System.out.println("Recognition failed");
-                                
-                                drawing.delete();
-                            } else {
-                                if(event instanceof PenUpEvent) {
-                                    // Recognition succeded
-                                
-                                    System.out.println("Recognition succeded");
-                                    
-                                    drawing.delete();
-                                    
-                                    CanvasAction intent = recognizer.getIntentOrNull();
-                                    intent.perform(canvas);
-                                    recognizer = null;
-                                }
-                            }
-                        }
-                        
-                        canvasPanel.repaint();
-                        canvasPanel.invalidate();
-                    }
+                    matcher.match(eventQueueInput);
                 } catch (InterruptedException ex) {
-                    Logger.getLogger(Main.class.getName()).log(Level.SEVERE, null, ex);
+                    
                 }
             }
         });
