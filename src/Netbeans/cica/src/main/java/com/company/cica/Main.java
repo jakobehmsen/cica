@@ -183,7 +183,7 @@ public class Main {
 
                         int distance = (int)Math.hypot(x1-x2, y1-y2);
                         
-                        if(distance > 5 || input.atEnd()) {
+                        if(distance > 10 || input.atEnd()) {
                             return new LineSegment(x1, y1, x2, y2);
                         }
                     }
@@ -212,9 +212,11 @@ public class Main {
                             
                             if(nextSegment != null) {
                                 double direction = nextSegment.direction();
-                                double delta = Math.abs(referenceDirection - direction);
+                                double delta = Math.abs(Math.abs(referenceDirection) - Math.abs(direction));
+                                System.out.println("referenceDirection=" + referenceDirection);
+                                System.out.println("direction=" + direction);
                                 System.out.println("delta=" + delta);
-                                if(Math.abs(referenceDirection - direction) > 20) {
+                                if(delta > 25.0) {
                                     return null;
                                 }
                                 segments.add(nextSegment);
