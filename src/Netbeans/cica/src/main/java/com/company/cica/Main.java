@@ -320,9 +320,6 @@ public class Main {
         }, event -> false);
         
         Thread eventProcessor = new Thread(new Runnable() {
-            Recognizer recognizer;
-            Drawing drawing;
-            
             @Override
             public void run() {
                 try {
