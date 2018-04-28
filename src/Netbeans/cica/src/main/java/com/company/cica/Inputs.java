@@ -23,12 +23,47 @@
  */
 package com.company.cica;
 
+import java.util.function.Predicate;
+import java.util.function.Supplier;
+
 /**
  *
  * @author jakob
  */
-public interface Input {
-    Object take();
-    Object peek();
-    boolean atEnd();
+public class Inputs {
+    public static Input fromProvider(Supplier<Object> supplier, Predicate<Object> marksEnd) {
+        return new Input() {
+            private boolean shouldTake = true;
+            private Object current;
+            
+            @Override
+            public Object take() {
+                ensureCurrentSet();
+                
+                shouldTake = true;
+                return current;
+            }
+
+            @Override
+            public Object peek() {
+                ensureCurrentSet();
+                
+                return current;
+            }
+
+            @Override
+            public boolean atEnd() {
+                ensureCurrentSet();
+                
+                return marksEnd.test(current);
+            }
+            
+            private void ensureCurrentSet() {
+                if(shouldTake) {
+                    current = supplier.get();
+                    shouldTake = false;
+                }
+            }
+        };
+    }
 }

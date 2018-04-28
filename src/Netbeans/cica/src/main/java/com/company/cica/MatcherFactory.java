@@ -27,8 +27,6 @@ package com.company.cica;
  *
  * @author jakob
  */
-public interface Input {
-    Object take();
-    Object peek();
-    boolean atEnd();
+public interface MatcherFactory {
+    Matcher fromLocation(int x, int y);
 }

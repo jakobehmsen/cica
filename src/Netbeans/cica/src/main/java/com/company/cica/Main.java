@@ -36,6 +36,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
+import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import javax.swing.JFrame;
@@ -84,7 +85,7 @@ public class Main {
     }
     
     private static class Matchers {
-        public static Matcher canvasDrawing(CanvasPanel canvasPanel, Matcher matcher) {
+        public static Matcher canvasDrawing(CanvasPanel canvasPanel, MatcherFactory matcherFactory) {
             return new Matcher() {
                 @Override
                 public Object match(Input input) throws InterruptedException {
@@ -99,16 +100,16 @@ public class Main {
 
                             canvasPanel.repaint();
                             canvasPanel.invalidate();
-
-                            Input inputWrapper = new Input() {
+                            
+                            Input inputWrapper = Inputs.fromProvider(new Supplier<Object>() {
                                 boolean first = true;
 
                                 @Override
-                                public Object take() throws InterruptedException {
-                                    if(first) {
+                                public Object get() {
+                                    /*if(first) {
                                         first = false;
                                         return event;
-                                    }
+                                    }*/
 
                                     Object event = input.take();
 
@@ -120,11 +121,13 @@ public class Main {
 
                                     return event;
                                 }
-                            };
+                                
+                            }, e -> e instanceof PenUpEvent);
 
                             // Start recognition
                             System.out.println("Start recognition");
 
+                            Matcher matcher = matcherFactory.fromLocation(((PenDownAtEvent)event).x, ((PenDownAtEvent)event).y);
                             Object result = matcher.match(inputWrapper);
 
                             if(result != null) {
@@ -151,75 +154,100 @@ public class Main {
             };
         }
         
-        public static Matcher lineMatcher() {
+        private static class LineSegment {
+            int x1;
+            int y1;
+            int x2;
+            int y2;
+
+            public LineSegment(int x1, int y1, int x2, int y2) {
+                this.x1 = x1;
+                this.y1 = y1;
+                this.x2 = x2;
+                this.y2 = y2;
+            }
+            
+            public double direction() {
+                return Math.toDegrees(Math.atan2(x2 - x1, y2 - y1));
+            }
+        }
+        
+        public static Matcher lineSegmentMatcher(int x1, int y1) {
             return new Matcher() {
                 @Override
                 public Object match(Input input) throws InterruptedException {
-                    Object event = input.take();
-                    
-                    if(event instanceof PenDownAtEvent) {
-                        return afterPenDown(input, (PenDownAtEvent)event);
-                    } else {
-                        return null;
-                    }
-                }
-                
-                private Object afterPenDown(Input input, PenDownAtEvent penDownEvent) throws InterruptedException {
-                    final int x = penDownEvent.x;
-                    final int y = penDownEvent.y;
+                    while(!input.atEnd() && input.peek() instanceof PenMovedToEvent) {
+                        PenMovedToEvent penMovedToEvent = (PenMovedToEvent)input.take();
+                        final int x2 = penMovedToEvent.x;
+                        final int y2 = penMovedToEvent.y;
 
-                    Object event = input.take();
-                    if(event instanceof PenMovedToEvent) {
-                        return firstDirection(input, x, y, (PenMovedToEvent)event);
-                    } else {
-                        return null;
-                    }
-                }
-
-                private Object firstDirection(Input input, int x1, int y1, PenMovedToEvent penMovedToEvent) throws InterruptedException {
-                    return proceedingDirection(input, x1, y1, x1, y1, false, 0.0, penMovedToEvent);
-                }
-                
-                private Object proceedingDirection(Input input, int xStart, int yStart, int x1, int y1, boolean hasReferenceDirection, double referenceDirection, PenMovedToEvent penMovedToEvent) throws InterruptedException {
-                    final int x2 = penMovedToEvent.x;
-                    final int y2 = penMovedToEvent.y;
-
-                    int distance = (int)Math.hypot(x1-x2, y1-y2);
-                    //System.out.println("distance=" + distance);
-                    if(distance > 5) {
-                        //System.out.println("accepted distance");
-                        final double direction = Math.toDegrees(Math.atan2(x2 - x1, y2 - y1));
-                        //System.out.println("referenceDirection=" + referenceDirection);
-                        System.out.println("direction=" + direction);
-                        double delta = Math.abs(referenceDirection - direction);
-                        System.out.println("delta=" + delta);
-                        if(!hasReferenceDirection || Math.abs(referenceDirection - direction) <= 20) {
-                            return proceedingDirectionState(input, xStart, yStart, x2, y2, true, direction);
-                        } else {
-                            return null;
+                        int distance = (int)Math.hypot(x1-x2, y1-y2);
+                        
+                        if(distance > 5 || input.atEnd()) {
+                            return new LineSegment(x1, y1, x2, y2);
                         }
-                    } else {
-                        //System.out.println("rejected distance");
-                        return proceedingDirectionState(input, xStart, yStart, x1, y1, hasReferenceDirection, referenceDirection);
                     }
-                }
-                
-                private Object proceedingDirectionState(Input input, int xStart, int yStart, int x1, int y1, boolean hasReferenceDirection, double referenceDirection) throws InterruptedException {
-                    Object event = input.take();
                     
-                    if(event instanceof PenMovedToEvent) {
-                        return proceedingDirection(input, xStart, yStart, x1, y1, hasReferenceDirection, referenceDirection, (PenMovedToEvent)event);
-                    } else if(event instanceof PenUpEvent) {
+                    return null;
+                }
+            };
+        }
+        
+        public static Matcher lineMatcher(int x1, int y1) {
+            return new Matcher() {
+                @Override
+                public Object match(Input input) throws InterruptedException {
+                    ArrayList<LineSegment> segments = new ArrayList<>();
+                    
+                    LineSegment firstSegment = (LineSegment) lineSegmentMatcher(x1, y1).match(input);
+                    
+                    if(firstSegment != null) {
+                        segments.add(firstSegment);
+                    
+                        final double referenceDirection = firstSegment.direction();
+                        
+                        while(!input.atEnd()) {
+                            LineSegment prevSegment = segments.get(segments.size() - 1);
+                            LineSegment nextSegment = (LineSegment) lineSegmentMatcher(prevSegment.x2, prevSegment.y2).match(input);
+                            
+                            if(nextSegment != null) {
+                                double direction = nextSegment.direction();
+                                double delta = Math.abs(referenceDirection - direction);
+                                System.out.println("delta=" + delta);
+                                if(Math.abs(referenceDirection - direction) > 20) {
+                                    return null;
+                                }
+                                segments.add(nextSegment);
+                            } else {
+                                return null;
+                            }
+                        }
+                    }
+                    
+                    LineSegment lastSegment = segments.get(segments.size() - 1);
+                    
+                    return new LineSegment(firstSegment.x1, firstSegment.y1, lastSegment.x2, lastSegment.y2);
+                }
+            };
+        }
+        
+        public static Matcher lineCanvasActionMatcher(int x1, int y1) {
+            Matcher lineMatcher = lineMatcher(x1, y1);
+            
+            return new Matcher() {
+                @Override
+                public Object match(Input input) throws InterruptedException {
+                    LineSegment line = (LineSegment) lineMatcher.match(input);
+                    if(line != null) {
                         return new CanvasAction() {
                             @Override
                             public void perform(Canvas canvas) {
-                                Drawing drawing = canvas.newDrawing(xStart, yStart);
-                                drawing.moveTo(x1, y1);
+                                Drawing drawing = canvas.newDrawing(line.x1, line.y1);
+                                drawing.moveTo(line.x2, line.y2);
                             }
                         };
-                    } else {
-                        return null;
                     }
+                    return null;
                 }
             };
         }
@@ -280,14 +308,16 @@ public class Main {
         
         CanvasPanel canvasPanel = new CanvasPanel();
         Canvas canvas = canvasPanel;
-        Matcher matcher = Matchers.canvasDrawing(canvasPanel, Matchers.lineMatcher()); 
+        Matcher matcher = Matchers.canvasDrawing(canvasPanel, (x, y) -> Matchers.lineCanvasActionMatcher(x, y));
         
-        Input eventQueueInput = new Input() {
-            @Override
-            public Object take() throws InterruptedException {
+        Input eventQueueInput = Inputs.fromProvider(() -> {
+            try {
                 return eventQueue.take();
+            } catch (InterruptedException ex) {
+                Logger.getLogger(Main.class.getName()).log(Level.SEVERE, null, ex);
+                return null;
             }
-        };
+        }, event -> false);
         
         Thread eventProcessor = new Thread(new Runnable() {
             Recognizer recognizer;
