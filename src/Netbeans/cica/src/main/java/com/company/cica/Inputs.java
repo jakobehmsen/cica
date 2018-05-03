@@ -23,6 +23,7 @@
  */
 package com.company.cica;
 
+import java.util.ArrayList;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 
@@ -35,6 +36,8 @@ public class Inputs {
         return new Input() {
             private boolean shouldTake = true;
             private Object current;
+            private int index;
+            private ArrayList<Object> buffer = new ArrayList<>();
             
             @Override
             public Object take() {
@@ -63,6 +66,54 @@ public class Inputs {
                     current = supplier.get();
                     shouldTake = false;
                 }
+            }
+
+            @Override
+            public InputState getState() {
+                throw new UnsupportedOperationException("Input is not recoverable.");
+            }
+        };
+    }
+    
+    public static Input toRecoverable(Input input) {
+        return new Input() {
+            private ArrayList<Object> buffer = new ArrayList<>();
+            private int index;
+
+            @Override
+            public InputState getState() {
+                int savedIndex = index;
+                
+                return () -> this.index = savedIndex;
+            }
+
+            @Override
+            public Object take() {
+                ensureBuffered(index);
+                Object o = buffer.get(index);
+                index++;
+                return o;
+            }
+            
+            private void ensureBuffered(int index) {
+                while(buffer.size() <= index) {
+                    if(!input.atEnd()) {
+                        buffer.add(input.take());
+                    } else {
+                        return;
+                    }
+                }
+            }
+
+            @Override
+            public Object peek() {
+                return buffer.get(index);
+            }
+
+            @Override
+            public boolean atEnd() {
+                ensureBuffered(index);
+                return index >= buffer.size();
             }
         };
     }

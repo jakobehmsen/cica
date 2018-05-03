@@ -101,7 +101,7 @@ public class Main {
                             canvasPanel.repaint();
                             canvasPanel.invalidate();
                             
-                            Input inputWrapper = Inputs.fromProvider(new Supplier<Object>() {
+                            Input inputWrapper = Inputs.toRecoverable(Inputs.fromProvider(new Supplier<Object>() {
                                 boolean first = true;
 
                                 @Override
@@ -122,7 +122,7 @@ public class Main {
                                     return event;
                                 }
                                 
-                            }, e -> e instanceof PenUpEvent);
+                            }, e -> e instanceof PenUpEvent));
 
                             // Start recognition
                             System.out.println("Start recognition");
@@ -193,7 +193,48 @@ public class Main {
             };
         }
         
+        private interface LineSegmentSequenceStrategy {
+            boolean nextSegment(int x1, int y1, int x2, int y2);
+            Object reduce();
+        }
+        
         public static Matcher lineMatcher(int x1, int y1) {
+            return lineSegmentSequenceMatcher(x1, y1, new LineSegmentSequenceStrategy() {
+                private ArrayList<LineSegment> segments = new ArrayList<>();
+                
+                @Override
+                public boolean nextSegment(int x1, int y1, int x2, int y2) {
+                    LineSegment segment = new LineSegment(x1, y1, x2, y2);
+                        
+                    boolean acceptsSegment;
+                    
+                    if(segments.isEmpty()) {
+                        acceptsSegment = true;
+                    } else {
+                        double referenceDirection = segments.get(0).direction();
+                        double direction = segment.direction();
+                        double delta = Math.abs(Math.abs(referenceDirection) - Math.abs(direction));
+                        
+                        acceptsSegment = delta <= 25.0;
+                    }
+                    
+                    if(acceptsSegment) {
+                        segments.add(new LineSegment(x1, y1, x2, y2));
+                    }
+                    
+                    return acceptsSegment;
+                }
+
+                @Override
+                public Object reduce() {
+                    LineSegment firstSegment = segments.get(0);
+                    LineSegment lastSegment = segments.get(segments.size() - 1);
+                    return new LineSegment(firstSegment.x1, firstSegment.y1, lastSegment.x2, lastSegment.y2);
+                }
+            });
+        }
+        
+        public static Matcher lineSegmentSequenceMatcher(int x1, int y1, LineSegmentSequenceStrategy strategy) {
             return new Matcher() {
                 @Override
                 public Object match(Input input) throws InterruptedException {
@@ -201,22 +242,15 @@ public class Main {
                     
                     LineSegment firstSegment = (LineSegment) lineSegmentMatcher(x1, y1).match(input);
                     
-                    if(firstSegment != null) {
+                    if(firstSegment != null && strategy.nextSegment(firstSegment.x1, firstSegment.y1, firstSegment.x2, firstSegment.y2)) {
                         segments.add(firstSegment);
-                    
-                        final double referenceDirection = firstSegment.direction();
                         
                         while(!input.atEnd()) {
                             LineSegment prevSegment = segments.get(segments.size() - 1);
                             LineSegment nextSegment = (LineSegment) lineSegmentMatcher(prevSegment.x2, prevSegment.y2).match(input);
                             
                             if(nextSegment != null) {
-                                double direction = nextSegment.direction();
-                                double delta = Math.abs(Math.abs(referenceDirection) - Math.abs(direction));
-                                System.out.println("referenceDirection=" + referenceDirection);
-                                System.out.println("direction=" + direction);
-                                System.out.println("delta=" + delta);
-                                if(delta > 25.0) {
+                                if(!strategy.nextSegment(nextSegment.x1, nextSegment.y1, nextSegment.x2, nextSegment.y2)) {
                                     return null;
                                 }
                                 segments.add(nextSegment);
@@ -224,11 +258,11 @@ public class Main {
                                 return null;
                             }
                         }
+                    
+                        return strategy.reduce();
                     }
                     
-                    LineSegment lastSegment = segments.get(segments.size() - 1);
-                    
-                    return new LineSegment(firstSegment.x1, firstSegment.y1, lastSegment.x2, lastSegment.y2);
+                    return null;
                 }
             };
         }
@@ -249,6 +283,39 @@ public class Main {
                             }
                         };
                     }
+                    return null;
+                }
+            };
+        }
+        
+        public static Matcher rectMatcher(int x1, int y1) {
+            return new Matcher() {
+                @Override
+                public Object match(Input input) throws InterruptedException {
+                    ArrayList<LineSegment> lines = new ArrayList<>();
+                    
+                    LineSegment line = (LineSegment) lineSegmentMatcher(x1, y1).match(input);
+                    
+                    if(line != null) {
+                        lines.add(line);
+                        
+                        double lastDirection = line.direction();
+                        
+                        for(int i = 1; i < 4; i++) {
+                            line = (LineSegment) lineSegmentMatcher(x1, y1).match(input);
+                            
+                            if(line != null) {
+                                lines.add(line);
+                                
+                                double newDirection = line.direction();
+                            } else {
+                                return null;
+                            }
+                        }
+                    } else {
+                        return null;
+                    }
+                    
                     return null;
                 }
             };

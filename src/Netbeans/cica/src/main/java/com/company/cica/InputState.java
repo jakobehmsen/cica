@@ -27,9 +27,6 @@ package com.company.cica;
  *
  * @author jakob
  */
-public interface Input {
-    Object take();
-    Object peek();
-    boolean atEnd();
-    InputState getState();
+public interface InputState {
+    void recover();
 }
