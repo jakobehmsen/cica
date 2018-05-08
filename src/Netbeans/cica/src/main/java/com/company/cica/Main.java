@@ -36,6 +36,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
+import java.util.function.BiFunction;
 import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -198,8 +199,43 @@ public class Main {
             Object reduce();
         }
         
-        public static Matcher lineMatcher(int x1, int y1) {
-            return lineSegmentSequenceMatcher(x1, y1, new LineSegmentSequenceStrategy() {
+        public static Matcher lineStrategy(int x1, int y1) {
+            //return lineSegmentSequenceMatcher(x1, y1, lineLineSegmentSequenceStrategy());
+            return fby(lineSegmentSequenceMatcher(x1, y1, lineLineSegmentSequenceStrategy()), eoi(), (line, t) -> line);
+        }
+        
+        public static Matcher fby(Matcher m1, Matcher m2, BiFunction<Object, Object, Object> reduction) {
+            return new Matcher() {
+                @Override
+                public Object match(Input input) throws InterruptedException {
+                    Object m1Result = m1.match(input);
+                    if(m1Result != null) {
+                        Object m2Result = m2.match(input);
+                        if(m2Result != null) {
+                            return reduction.apply(m1Result, m2Result);
+                        }
+                    }
+                    
+                    return null;
+                }
+            };
+        }
+        
+        public static Matcher eoi() {
+            return new Matcher() {
+                @Override
+                public Object match(Input input) throws InterruptedException {
+                    if(input.atEnd()) {
+                        return true;
+                    }
+                    
+                    return null;
+                }
+            };
+        }
+        
+        public static LineSegmentSequenceStrategy lineLineSegmentSequenceStrategy() {
+            return new LineSegmentSequenceStrategy() {
                 private ArrayList<LineSegment> segments = new ArrayList<>();
                 
                 @Override
@@ -231,7 +267,16 @@ public class Main {
                     LineSegment lastSegment = segments.get(segments.size() - 1);
                     return new LineSegment(firstSegment.x1, firstSegment.y1, lastSegment.x2, lastSegment.y2);
                 }
-            });
+            };
+        }
+        
+        public static Matcher rectStrategy(int x1, int y1) {
+            return new Matcher() {
+                @Override
+                public Object match(Input input) throws InterruptedException {
+                    throw new UnsupportedOperationException("Not supported yet."); //To change body of generated methods, choose Tools | Templates.
+                }
+            };
         }
         
         public static Matcher lineSegmentSequenceMatcher(int x1, int y1, LineSegmentSequenceStrategy strategy) {
@@ -247,15 +292,16 @@ public class Main {
                         
                         while(!input.atEnd()) {
                             LineSegment prevSegment = segments.get(segments.size() - 1);
+                    
                             LineSegment nextSegment = (LineSegment) lineSegmentMatcher(prevSegment.x2, prevSegment.y2).match(input);
                             
                             if(nextSegment != null) {
                                 if(!strategy.nextSegment(nextSegment.x1, nextSegment.y1, nextSegment.x2, nextSegment.y2)) {
-                                    return null;
+                                    break;
                                 }
                                 segments.add(nextSegment);
                             } else {
-                                return null;
+                                break;
                             }
                         }
                     
@@ -268,7 +314,7 @@ public class Main {
         }
         
         public static Matcher lineCanvasActionMatcher(int x1, int y1) {
-            Matcher lineMatcher = lineMatcher(x1, y1);
+            Matcher lineMatcher = lineStrategy(x1, y1);
             
             return new Matcher() {
                 @Override
