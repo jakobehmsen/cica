@@ -33,10 +33,12 @@ import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.awt.geom.GeneralPath;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.function.BiFunction;
+import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -169,7 +171,18 @@ public class Main {
             }
             
             public double direction() {
-                return Math.toDegrees(Math.atan2(x2 - x1, y2 - y1));
+                //return Math.toDegrees(Math.atan2(x2 - x1, y2 - y1));
+                //return Math.toDegrees(Math.atan2(y2 - y1, x2 - x1));
+                
+                
+                double xDiff = x2 - x1;
+                double yDiff = y2 - y1;
+                return Math.toDegrees(Math.atan2(yDiff, xDiff));
+                //return Math.atan2(yDiff, xDiff);
+            }
+            
+            public double distance() {
+                return Math.hypot(x1-x2, y1-y2);
             }
         }
         
@@ -200,11 +213,128 @@ public class Main {
         }
         
         public static Matcher lineStrategy(int x1, int y1) {
-            //return lineSegmentSequenceMatcher(x1, y1, lineLineSegmentSequenceStrategy());
-            return fby(lineSegmentSequenceMatcher(x1, y1, lineLineSegmentSequenceStrategy()), eoi(), (line, t) -> line);
+            return seq(lineSegmentSequenceMatcher(x1, y1, lineLineSegmentSequenceStrategy()), eoi(), (line, t) -> line);
         }
         
-        public static Matcher fby(Matcher m1, Matcher m2, BiFunction<Object, Object, Object> reduction) {
+        private static double distanceAngles(double alpha, double beta) {
+            double phi = Math.abs(beta - alpha) % 360;       // This is either the distance or 360 - distance
+            double distance = phi > 180 ? 360 - phi : phi;
+            return distance;
+        }
+        
+        private static SequenceMatcherFactory rectLineMatcherFactory(int x1Orig, int y1Orig) {
+            return l -> {
+                int x1;
+                int y1;
+                
+                if(l.isEmpty()) {
+                    System.out.println("rectLineMatcherFactory/no lines");
+                    x1 = x1Orig;
+                    y1 = y1Orig;
+                } else {
+                    System.out.println("rectLineMatcherFactory/some lines");
+                    LineSegment lastLine = (LineSegment) l.get(l.size() - 1);
+                    
+                    x1 = lastLine.x2;
+                    y1 = lastLine.y2;
+                    
+                    if(l.size() > 1) {
+                        System.out.println("rectLineMatcherFactory/multiple lines");
+                        LineSegment prevLine = (LineSegment) l.get(l.size() - 2);
+                        
+                        double directionDelta = angleDeltaC(prevLine.direction(), lastLine.direction());
+                        System.out.println("rectLineMatcherFactory/directionDelta=" + directionDelta);
+                        
+                        if(directionDelta < 15 || directionDelta > 180) {
+                            return null;
+                        }
+                    }
+                }
+                
+                return lineSegmentSequenceMatcher(x1, y1, lineLineSegmentSequenceStrategy());
+            };
+        }
+        
+        public static Matcher rectStrategy(int x1, int y1) {
+            return seq(
+                Arrays.<SequenceMatcherFactory>asList(
+                    rectLineMatcherFactory(x1, y1),
+                    rectLineMatcherFactory(x1, y1),
+                    rectLineMatcherFactory(x1, y1),
+                    rectLineMatcherFactory(x1, y1),
+                    l -> eoi(),
+                    l -> {
+                        LineSegment firstLine = (LineSegment) l.get(0);
+                        LineSegment lastLine = (LineSegment) l.get(3);
+                        
+                        LineSegment diagonalLine = new LineSegment(
+                            firstLine.x2, firstLine.y2,
+                            lastLine.x1, lastLine.y1);
+                        double maxDelta = diagonalLine.distance() * 0.25;
+                        
+                        int deltaX = Math.abs(firstLine.x1 - lastLine.x2);
+                        int deltaY = Math.abs(firstLine.y1 - lastLine.y2);
+                        
+                        if(deltaX > maxDelta || deltaY > maxDelta) {
+                            return f();
+                        }
+                        
+                        return t();
+                    }
+                ), 
+                l -> {
+                    return l;
+                }
+            );
+        }
+        
+        public static Matcher t() {
+            return new Matcher() {
+                @Override
+                public Object match(Input input) throws InterruptedException {
+                    return true;
+                }
+            };
+        }
+        
+        public static Matcher f() {
+            return new Matcher() {
+                @Override
+                public Object match(Input input) throws InterruptedException {
+                    return null;
+                }
+            };
+        }
+        
+        public interface SequenceMatcherFactory {
+            Matcher createMatcher(List<Object> list);
+        }
+        
+        public static Matcher seq(List<SequenceMatcherFactory> factories, Function<List<Object>, Object> reduction) {
+            return new Matcher() {
+                @Override
+                public Object match(Input input) throws InterruptedException {
+                    ArrayList<Object> list = new ArrayList<>();
+                    
+                    for(SequenceMatcherFactory f: factories) {
+                        Matcher m = f.createMatcher(list);
+                        if(m == null) {
+                            return null;
+                        }
+                        Object o = m.match(input);
+                        if(o != null) {
+                            list.add(o);
+                        } else {
+                            return null;
+                        }
+                    }
+                    
+                    return reduction.apply(list);
+                }
+            };
+        }
+        
+        public static Matcher seq(Matcher m1, Matcher m2, BiFunction<Object, Object, Object> reduction) {
             return new Matcher() {
                 @Override
                 public Object match(Input input) throws InterruptedException {
@@ -251,7 +381,7 @@ public class Main {
                         double direction = segment.direction();
                         double delta = Math.abs(Math.abs(referenceDirection) - Math.abs(direction));
                         
-                        acceptsSegment = delta <= 25.0;
+                        acceptsSegment = delta <= 30.0;
                     }
                     
                     if(acceptsSegment) {
@@ -266,15 +396,6 @@ public class Main {
                     LineSegment firstSegment = segments.get(0);
                     LineSegment lastSegment = segments.get(segments.size() - 1);
                     return new LineSegment(firstSegment.x1, firstSegment.y1, lastSegment.x2, lastSegment.y2);
-                }
-            };
-        }
-        
-        public static Matcher rectStrategy(int x1, int y1) {
-            return new Matcher() {
-                @Override
-                public Object match(Input input) throws InterruptedException {
-                    throw new UnsupportedOperationException("Not supported yet."); //To change body of generated methods, choose Tools | Templates.
                 }
             };
         }
@@ -326,6 +447,33 @@ public class Main {
                             public void perform(Canvas canvas) {
                                 Drawing drawing = canvas.newDrawing(line.x1, line.y1);
                                 drawing.moveTo(line.x2, line.y2);
+                            }
+                        };
+                    }
+                    return null;
+                }
+            };
+        }
+        
+        public static Matcher rectCanvasActionMatcher(int x1, int y1) {
+            Matcher rectMatcher = rectStrategy(x1, y1);
+            
+            return new Matcher() {
+                @Override
+                public Object match(Input input) throws InterruptedException {
+                    List<Object> lines = (List<Object>) rectMatcher.match(input);
+                    if(lines != null) {
+                        return new CanvasAction() {
+                            @Override
+                            public void perform(Canvas canvas) {
+                                LineSegment firstLine = (LineSegment) lines.get(0);
+                                Drawing drawing = canvas.newDrawing(firstLine.x1, firstLine.y1);
+                                drawing.moveTo(firstLine.x2, firstLine.y2);
+                                for(int i = 1; i < 3; i++) {
+                                    LineSegment nextLine = (LineSegment) lines.get(i);
+                                    drawing.moveTo(nextLine.x2, nextLine.y2);
+                                }
+                                drawing.moveTo(firstLine.x1, firstLine.y1);
                             }
                         };
                     }
@@ -417,13 +565,65 @@ public class Main {
         }
     }
     
-    public static void main(String[] args) {      
+    private static void printDirection(String label, int x1, int y1, int x2, int y2) {
+        System.out.println(label + ": " + new Matchers.LineSegment(x1, y1, x2, y2).direction());
+    }
+    
+    private static double angleDeltaC(double angle1, double angle2) {
+        return angleDeltaC(angle1, angle2, -180, 180);
+    }
+    
+    private static double angleDeltaCC(double angle1, double angle2) {
+        return angleDeltaCC(angle1, angle2, -180, 180);
+    }
+    
+    private static double angleDeltaC(double angle1, double angle2, double min, double max) {
+        if(angle1 > angle2) {
+            angle2 += (max - min);
+        }
+        
+        return angle2 - angle1;
+    }
+    
+    private static double angleDeltaCC(double angle1, double angle2, double min, double max) {
+        return angleDeltaC(angle2, angle1);
+    }
+    
+    public static void main(String[] args) {
+        printDirection("East", 5, 5, 10, 5);
+        printDirection("South east", 5, 5, 10, 10);
+        printDirection("South", 5, 5, 5, 10);
+        printDirection("South west", 5, 5, 0, 10);
+        printDirection("West", 5, 5, 0, 5);
+        printDirection("North west", 5, 5, 0, 0);
+        printDirection("North", 5, 5, 5, 0);
+        printDirection("North east", 5, 5, 10, 0);
+        
+        System.out.println(angleDeltaC(90, 180));
+        System.out.println(angleDeltaC(180, -90));
+        System.out.println(angleDeltaC(-90, 0));
+        System.out.println(angleDeltaC(0, 90));
+        
+        System.out.println(angleDeltaC(100, 190));
+        System.out.println(angleDeltaC(190, -80));
+        System.out.println(angleDeltaC(-80, 10));
+        System.out.println(angleDeltaC(10, 100));
+        
+        System.out.println(angleDeltaCC(180, 90));
+        System.out.println(angleDeltaCC(90, 0));
+        System.out.println(angleDeltaCC(0, -90));
+        System.out.println(angleDeltaCC(-90, 180));
+        
+        /*if(1 != 2) {
+            return;
+        }*/
         
         BlockingQueue<Object> eventQueue = new ArrayBlockingQueue<>(10);
         
         CanvasPanel canvasPanel = new CanvasPanel();
         Canvas canvas = canvasPanel;
-        Matcher matcher = Matchers.canvasDrawing(canvasPanel, (x, y) -> Matchers.lineCanvasActionMatcher(x, y));
+        //Matcher matcher = Matchers.canvasDrawing(canvasPanel, (x, y) -> Matchers.lineCanvasActionMatcher(x, y));
+        Matcher matcher = Matchers.canvasDrawing(canvasPanel, (x, y) -> Matchers.rectCanvasActionMatcher(x, y));
         
         Input eventQueueInput = Inputs.fromProvider(() -> {
             try {
